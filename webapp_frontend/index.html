@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>e-budget</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;--text:#111111;--muted:#6b7280;--accent:#3b82f6;--card:#f5f7fb;--border:#e5e7eb;
+    }
+    body{margin:0;font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu; background:var(--bg); color:var(--text);}
+    .wrap{max-width:920px;margin:0 auto;padding:16px 14px 28px;}
+    .h{font-size:24px;font-weight:800;margin:0 0 8px;}
+    .muted{color:var(--muted);font-size:13px;margin-bottom:18px}
+    .tabs{display:flex;gap:8px;margin-bottom:14px}
+    .tab{flex:1;display:grid;place-items:center;height:40px;border:1px solid var(--border);border-radius:10px;background:var(--card);cursor:pointer}
+    .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    form{display:grid;grid-template-columns:1fr 140px;gap:10px;align-items:center;margin-bottom:12px}
+    input,select,button{height:42px;border-radius:10px;border:1px solid var(--border);padding:0 12px;background:#fff}
+    button{background:var(--accent);color:#fff;border:0;font-weight:700;cursor:pointer}
+    .grid{display:grid;gap:8px}
+    .card{border:1px solid var(--border);background:var(--card);border-radius:12px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center}
+    .sum{font-weight:800}
+    .pos{color:#16a34a}.neg{color:#ef4444}
+    .empty{color:var(--muted);font-size:14px;text-align:center;padding:16px;border:1px dashed var(--border);border-radius:12px;background:var(--card)}
+    .foot{margin-top:12px;color:var(--muted);font-size:12px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="h">Привет из мини-приложения 👋</h1>
+    <p class="muted">Добавь доход или расход — запись сразу улетит на бэкенд и отобразится ниже.</p>
+
+    <div class="tabs">
+      <div id="tab-exp" class="tab active">Расход</div>
+      <div id="tab-inc" class="tab">Доход</div>
+    </div>
+
+    <form id="form">
+      <input id="title" placeholder="Комментарий (например: Кофе / Зарплата)" required />
+      <div style="display:flex;gap:8px">
+        <input id="amount" type="number" step="0.01" placeholder="Сумма" required style="width:100%">
+        <button type="submit">Сохранить</button>
+      </div>
+    </form>
+
+    <div class="grid" id="list"></div>
+    <div class="foot">e-budget • demo</div>
+  </div>
+
+<script>
+(function(){
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    // применяем тему Telegram
+    const th = tg.themeParams || {};
+    setCSS('--bg', th.bg_color);
+    setCSS('--text', th.text_color);
+    setCSS('--muted', th.hint_color);
+    setCSS('--accent', th.button_color);
+    setCSS('--card', th.secondary_bg_color);
+    setCSS('--border', 'rgba(0,0,0,.08)');
+  }
+  function setCSS(name, v){ if (v) document.documentElement.style.setProperty(name, v); }
+
+  // вкладки тип операции
+  let type = 'expense';
+  const tabExp = document.getElementById('tab-exp');
+  const tabInc = document.getElementById('tab-inc');
+  function setType(t){
+    type=t;
+    tabExp.classList.toggle('active', t==='expense');
+    tabInc.classList.toggle('active', t==='income');
+  }
+  tabExp.onclick = ()=> setType('expense');
+  tabInc.onclick = ()=> setType('income');
+
+  const listEl = document.getElementById('list');
+  const form = document.getElementById('form');
+  const title = document.getElementById('title');
+  const amount = document.getElementById('amount');
+
+  // Бэк — тот же домен (Render): /api/*
+  const API = (p)=> `${location.origin}${p}`;
+
+  function itemHTML(it){
+    const sign = it.type==='income' ? '+' : '-';
+    const cls = it.type==='income' ? 'pos' : 'neg';
+    return `<div class="card">
+      <div>
+        <div><b>${escapeHtml(it.title||'Без названия')}</b></div>
+        <div class="muted">${new Date(it.ts).toLocaleString()}</div>
+      </div>
+      <div class="sum ${cls}">${sign}${Number(it.amount).toFixed(2)}</div>
+    </div>`;
+  }
+  function render(items){
+    if(!items?.length){
+      listEl.innerHTML = `<div class="empty">Пока нет записей</div>`;
+      return;
+    }
+    listEl.innerHTML = items.map(itemHTML).join('');
+  }
+
+  async function load(){
+    try{
+      const r = await fetch(API('/api/entries'));
+      const data = await r.json();
+      render(data.items || []);
+    }catch(e){ console.error(e); }
+  }
+
+  form.onsubmit = async (e)=>{
+    e.preventDefault();
+    const body = {
+      type, title: title.value.trim(),
+      amount: Number(amount.value||0),
+    };
+    if (!body.title || !body.amount) return;
+    try{
+      tg?.MainButton?.showProgress?.();
+      const r = await fetch(API('/api/entry'), {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      if(!data.ok) throw new Error('Server error');
+      title.value=''; amount.value='';
+      await load();
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+    }catch(err){
+      console.error(err);
+      tg?.HapticFeedback?.notificationOccurred?.('error');
+      alert('Не удалось сохранить запись');
+    }finally{
+      tg?.MainButton?.hideProgress?.();
+    }
+  };
+
+  function escapeHtml(s){return s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+
+  load();
+})();
+</script>
+</body>
+</html>

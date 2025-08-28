@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+cloudflared*.exe
+PortableGit/
+.tools/
+tunnel_url.txt
+.env
+Токен.txt
+Токен.txt
+*Токен*.txt
